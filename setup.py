@@ -15,6 +15,6 @@ setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
     ],
-    modules=["gpx-hr-merge"],
+    py_modules=["gpx_hr_merge"],
     entry_points={"console_scripts": ["gpx-hr-merge=gpx_hr_merge:main"]},
 )
