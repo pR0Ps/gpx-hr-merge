@@ -23,18 +23,18 @@ ns = {
 def parse_datetime(s, fmts):
     for fmt in fmts:
         with contextlib.suppress(ValueError):
-            return datetime.strptime(s, fmt).replace(microsecond=0)
+            return datetime.strptime(s, fmt)
     raise ValueError("Timestamp '{}' not in a recognized format ({})", s, " / ".join(fmts))
 
 
 def load_hr_data(hr_filename):
-    """Load HR data from a file into a data structure
+    """Load HR data from a file into a list of (time, hr) tuples
 
     Expects a CSV file with (date, hr) pairs
     Expects dates to be formated according to one of CSV_DATE_FMTS
     """
     # TODO: autodetect and support other common formats?
-    data = {}
+    data = []
     with open(hr_filename, "rt", newline="") as f:
         reader = csv.reader(f)
 
@@ -46,10 +46,8 @@ def load_hr_data(hr_filename):
 
         # Process the data into a time -> hr mapping
         for row in rows:
-            date = parse_datetime(row[0], CSV_DATE_FMTS)
-            hr = row[1]
-            data[date] = hr
-    return data
+            data.append((parse_datetime(row[0], CSV_DATE_FMTS), int(row[1])))
+    return sorted(data)
 
 
 def get_time(trkpt):
@@ -79,11 +77,49 @@ def set_hr(trkpt, value):
     hr.text = str(value)
 
 
-def merge(gpx_file, hr_file):
+def binary_search_lerp(time, hr_data, max_interpolate=None):
+    """Perform a binary search for the time in the HR data
+
+    Use linear interpolation (within the max_interpolate param) to return a
+    value if no exact results exist.
+    """
+    min_, max_, i = 0, len(hr_data) - 1, None
+    while min_ <= max_:
+        idx = (min_ + max_) // 2
+        if hr_data[idx][0] == time:
+            # exact match - return it
+            return hr_data[idx][1]
+        elif hr_data[idx][0] < time:
+            min_ = idx + 1
+        else:
+            max_ = idx - 1
+
+    # No exact match
+    # Make sure index is always on the lower bound
+    if hr_data[idx][0] > time:
+        idx -= 1
+
+    # Don't interpolate missing data
+    if not (0 <= idx < len(hr_data) - 1):
+        return None
+
+    (time1, hr1), (time2, hr2) = hr_data[idx:idx+2]
+
+    # Only interpolate if it's within range, otherwise return no data
+    if max_interpolate is not None and min(time-time1, time2-time).total_seconds() > max_interpolate:
+        return None
+
+    return round(hr1 + (hr2-hr1) * ((time-time1) / (time2-time1)))
+
+
+def merge(gpx_file, hr_file, interpolate):
 
     print("Merging heart rate date from {} into {}...".format(hr_file, gpx_file))
     # Read in the hr_data
     hr_data = load_hr_data(hr_file)
+
+    if not os.path.exists(gpx_file):
+        raise Exception("GPX file {} does not exist".format(gpx_file))
 
     # Move the original file to filename.orig
     orig_gpx = "{}.orig".format(gpx_file)
@@ -100,10 +136,12 @@ def merge(gpx_file, hr_file):
 
         # Iterate over all the trackpoints
         for trkpt in gpx.iterfind("./gpx:trk/gpx:trkseg/gpx:trkpt", ns):
-            # Use the point data to look up the new HR and set it if it exists
+            # Use the point data to look up the HR from the CSV
+            # Will interpolate a value if no exact match is found
             point_time = get_time(trkpt)
-            if point_time in hr_data:
-                set_hr(trkpt, hr_data[point_time])
+            hr_at_time = binary_search_lerp(point_time, hr_data, max_interpolate=1 if not interpolate else None)
+            if hr_at_time:
+                set_hr(trkpt, hr_at_time)
 
         # Write the document out
         gpx.write(gpx_file, xml_declaration=True, encoding="UTF-8")
@@ -120,9 +158,10 @@ def main():
     )
     parser.add_argument("--gpx", help="The GPX file to modify", required=True)
     parser.add_argument("--hr", help="The heart rate data file", required=True)
+    parser.add_argument("--interpolate", help="Interpolate missing heart rate data?", action="store_true")
     args = parser.parse_args()
 
-    merge(gpx_file=args.gpx, hr_file=args.hr)
+    merge(gpx_file=args.gpx, hr_file=args.hr, interpolate=args.interpolate)
 
 
 if __name__ == "__main__":
