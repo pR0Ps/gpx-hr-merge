@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import contextlib
 import csv
 from datetime import datetime
 import os
@@ -8,8 +9,8 @@ import xml.etree.ElementTree as ET
 
 
 # Formats for parsing datetimes from GPX and CSV files (may be device-specific)
-GPX_DATE_FMT = "%Y-%m-%dT%H:%M:%SZ"
-CSV_DATE_FMT = "%Y-%m-%d %H:%M:%S"
+GPX_DATE_FMTS = ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ")
+CSV_DATE_FMTS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ")
 
 
 # XML Namespaces
@@ -19,11 +20,18 @@ ns = {
 }
 
 
+def parse_datetime(s, fmts):
+    for fmt in fmts:
+        with contextlib.suppress(ValueError):
+            return datetime.strptime(s, fmt).replace(microsecond=0)
+    raise ValueError("Timestamp '{}' not in a recognized format ({})", s, " / ".join(fmts))
+
+
 def load_hr_data(hr_filename):
     """Load HR data from a file into a data structure
 
     Expects a CSV file with (date, hr) pairs
-    Expects dates to be formated according to CSV_DATE_FORMAT
+    Expects dates to be formated according to one of CSV_DATE_FMTS
     """
     # TODO: autodetect and support other common formats?
     data = {}
@@ -38,16 +46,19 @@ def load_hr_data(hr_filename):
 
         # Process the data into a time -> hr mapping
         for row in rows:
-            date = datetime.strptime(row[0], CSV_DATE_FMT)
+            date = parse_datetime(row[0], CSV_DATE_FMTS)
             hr = row[1]
             data[date] = hr
     return data
 
 
 def get_time(trkpt):
-    """Get the time for the trackpoint"""
+    """Get the time for the trackpoint
+
+    Expects dates to be formatted according to one of GPX_DATE_FMTS
+    """
     time = trkpt.find("gpx:time", ns).text
-    return datetime.strptime(time, GPX_DATE_FMT)
+    return parse_datetime(time, GPX_DATE_FMTS)
 
 
 def set_hr(trkpt, value):
@@ -105,7 +116,7 @@ def merge(gpx_file, hr_file):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Merge HR data from a Fitbit into a GPX file"
+        description="Merge HR data from a CSV into a GPX file"
     )
     parser.add_argument("--gpx", help="The GPX file to modify", required=True)
     parser.add_argument("--hr", help="The heart rate data file", required=True)

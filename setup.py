@@ -5,7 +5,7 @@ from setuptools import setup
 setup(
     name="gpx-hr-merge",
     version="0.0.1",
-    description="Merge heart rate data from a Fitbit into a GPX file",
+    description="Merge heart rate data from a CSV into a GPX file",
     url="https://github.com/pR0Ps/gpx-hr-merge",
     license="GPLv3",
     classifiers=[
